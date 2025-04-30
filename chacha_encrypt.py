@@ -2,6 +2,7 @@ import struct
 import os
 from pathlib import Path
 import stat
+import shutil
 
 # --- ChaCha20 Core Functions ---
 def rotl32(v, n):
