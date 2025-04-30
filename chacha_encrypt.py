@@ -1,9 +1,6 @@
 import struct
 import os
-import zipfile
 from pathlib import Path
-import tempfile
-import shutil
 import stat
 
 # --- ChaCha20 Core Functions ---
@@ -34,34 +31,34 @@ def chacha_block(key, counter, nonce):
         *struct.unpack('<3L', nonce)
     ]
     working_state = state.copy()
-    
+
     for _ in range(10):
         working_state[0], working_state[4], working_state[8], working_state[12] = chacha_quarter_round(*[working_state[i] for i in [0,4,8,12]])
         working_state[1], working_state[5], working_state[9], working_state[13] = chacha_quarter_round(*[working_state[i] for i in [1,5,9,13]])
         working_state[2], working_state[6], working_state[10], working_state[14] = chacha_quarter_round(*[working_state[i] for i in [2,6,10,14]])
         working_state[3], working_state[7], working_state[11], working_state[15] = chacha_quarter_round(*[working_state[i] for i in [3,7,11,15]])
-        
+
         working_state[0], working_state[5], working_state[10], working_state[15] = chacha_quarter_round(*[working_state[i] for i in [0,5,10,15]])
         working_state[1], working_state[6], working_state[11], working_state[12] = chacha_quarter_round(*[working_state[i] for i in [1,6,11,12]])
         working_state[2], working_state[7], working_state[8], working_state[13] = chacha_quarter_round(*[working_state[i] for i in [2,7,8,13]])
         working_state[3], working_state[4], working_state[9], working_state[14] = chacha_quarter_round(*[working_state[i] for i in [3,4,9,14]])
-    
+
     for i in range(16):
         working_state[i] = (working_state[i] + state[i]) & 0xFFFFFFFF
-    
+
     return struct.pack('<16L', *working_state)
 
 def chacha_encrypt_data(key, nonce, plaintext):
     ciphertext = bytearray()
     counter = 0
-    
+
     for i in range(0, len(plaintext), 64):
         block = chacha_block(key, counter, nonce)
         counter += 1
         chunk = plaintext[i:i+64]
         encrypted_chunk = bytes(a ^ b for a, b in zip(chunk, block[:len(chunk)]))
         ciphertext.extend(encrypted_chunk)
-    
+
     return bytes(ciphertext)
 
 # --- File System Utilities ---
@@ -84,7 +81,7 @@ def clean_git_repo(folder_path):
                         os.chmod(file_path, stat.S_IWRITE)
                     except Exception as e:
                         print(f"Warning: Could not modify permissions for {file_path}: {e}")
-            
+
             # Remove .git folder
             shutil.rmtree(git_path, onerror=remove_readonly)
             print("Successfully removed Git metadata")
@@ -94,28 +91,26 @@ def clean_git_repo(folder_path):
             return False
     return True
 
-def zip_folder(folder_path, zip_path):
-    """Create zip archive while handling special cases"""
+def encrypt_file(file_path, key, nonce):
+    """Encrypt a single file in place"""
     try:
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, dirs, files in os.walk(folder_path):
-                # Skip hidden directories
-                dirs[:] = [d for d in dirs if not d.startswith('.')]
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    try:
-                        arcname = os.path.relpath(file_path, folder_path)
-                        zipf.write(file_path, arcname)
-                    except Exception as e:
-                        print(f"Warning: Skipped {file_path} - {str(e)}")
-                        continue
+        with open(file_path, 'rb') as f:
+            plaintext = f.read()
+
+        encrypted_data = chacha_encrypt_data(key, nonce, plaintext)
+
+        # Write encrypted data back to the same file
+        with open(file_path, 'wb') as f:
+            f.write(encrypted_data)
+
+        return True
     except Exception as e:
-        print(f"Error creating zip file: {str(e)}")
-        raise
+        print(f"Error encrypting {file_path}: {str(e)}")
+        return False
 
 # --- Main Encryption Function ---
-def encrypt_and_clean(folder_path, key, nonce):
-    """Enhanced folder encryption with Git handling"""
+def encrypt_folder_in_place(folder_path, key, nonce):
+    """Encrypt all files in folder without zipping"""
     folder_path = Path(folder_path).resolve()
     if not folder_path.exists():
         print(f"Error: Folder '{folder_path}' does not exist")
@@ -124,74 +119,72 @@ def encrypt_and_clean(folder_path, key, nonce):
     # Clean Git repository first
     clean_git_repo(folder_path)
 
-    output_path = folder_path.parent / f"{folder_path.name}.encrypted"
-    
+    encrypted_files = 0
+    failed_files = 0
+
+    print(f"\nEncrypting files in {folder_path}...")
+
     try:
-        temp_zip_path = folder_path.parent / f"temp_{folder_path.name}.zip"
-        
-        print(f"\nCreating zip archive of {folder_path}...")
-        zip_folder(folder_path, temp_zip_path)
-        
-        print("Reading zip content...")
-        with open(temp_zip_path, 'rb') as f:
-            zip_data = f.read()
-        
-        print("Encrypting with ChaCha20...")
-        encrypted_data = chacha_encrypt_data(key, nonce, zip_data)
-        
-        print(f"Saving encrypted file to {output_path}...")
-        with open(output_path, 'wb') as f:
-            f.write(encrypted_data)
-        
-        # Verify encryption
-        if not output_path.exists() or os.path.getsize(output_path) == 0:
-            raise Exception("Encrypted file creation failed")
-        
-        # Delete original folder
-        print("\nDeleting original folder...")
-        try:
-            shutil.rmtree(folder_path, onerror=remove_readonly)
-            delete_success = not folder_path.exists()
-        except Exception as e:
-            print(f"Warning: Could not fully delete original folder: {str(e)}")
-            delete_success = False
-        
-        # Cleanup
-        temp_zip_path.unlink(missing_ok=True)
-        
+        for root, dirs, files in os.walk(folder_path):
+            # Skip hidden directories
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
+
+            for file in files:
+                file_path = Path(root) / file
+
+                # Skip already encrypted files to prevent double encryption
+                if file_path.suffix == '.encrypted':
+                    continue
+
+                print(f"Encrypting: {file_path}")
+                if encrypt_file(file_path, key, nonce):
+                    # Rename to mark as encrypted
+                    new_path = file_path.with_suffix(file_path.suffix + '.encrypted')
+                    file_path.rename(new_path)
+                    encrypted_files += 1
+                else:
+                    failed_files += 1
+
         print(f"\n{'='*40}")
-        print("Encryption Successful!")
-        print(f"Encrypted file: {output_path}")
-        if delete_success:
-            print(f"Original folder was completely removed")
-        else:
-            print(f"Warning: Some files remain in original location")
-            print("Please delete manually:")
-            print(f"  {folder_path}")
+        print("Encryption Complete!")
+        print(f"Files encrypted: {encrypted_files}")
+        print(f"Files failed: {failed_files}")
         print("="*40)
-        
-        return True
+
+        return encrypted_files > 0
+
     except Exception as e:
-        print(f"\nError during encryption: {str(e)}")
-        temp_zip_path.unlink(missing_ok=True)
-        if 'output_path' in locals() and output_path.exists():
-            output_path.unlink()
+        print(f"\nError during folder encryption: {str(e)}")
         return False
 
 if __name__ == "__main__":
-    print("=== Secure Folder Encryption ===")
-    print("Creates [folder].encrypted and removes original\n")
-    
-    # Security parameters
-    key = bytes.fromhex('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f')
-    nonce = bytes.fromhex('000000090000004a00000000')
-    
-    folder_path = input("Enter path to folder to encrypt: ").strip()
-    
-    if encrypt_and_clean(folder_path, key, nonce):
-        print("\nSECURITY INFORMATION (SAVE THESE):")
-        print(f"Key: {key.hex()}")
-        print(f"Nonce: {nonce.hex()}")
-        print("\nYou MUST save both to decrypt later!")
+    print("=== In-Place File Encryption ===")
+    print("Encrypts files individually in the test folder\n")
+
+    # Security parameters from environment variables
+    key_hex = os.environ.get('CHACHA_KEY')
+    nonce_hex = os.environ.get('CHACHA_NONCE')
+
+    if key_hex and nonce_hex:
+        try:
+            key = bytes.fromhex(key_hex)
+            nonce = bytes.fromhex(nonce_hex)
+            print("Using key and nonce from environment variables.")
+
+            # Automatically target the "test folder" in the same directory as the script
+            script_directory = os.path.dirname(os.path.abspath(__file__))
+            target_folder = os.path.join(script_directory, "test folder")
+            print(f"Attempting to encrypt files in folder: {target_folder}")
+
+            if encrypt_folder_in_place(target_folder, key, nonce):
+                print("\nEncryption successful! Files in 'test folder' have been encrypted.")
+            else:
+                print("\nEncryption failed or no files found in 'test folder'.")
+
+        except ValueError:
+            print("Invalid key or nonce format in environment variables. Must be valid hexadecimal.")
+            exit(1)
     else:
-        print("\nEncryption failed. Original folder remains unchanged.")
+        print("Error: Environment variables CHACHA_KEY and CHACHA_NONCE not found. Exiting.")
+        print("Ensure these are set when running the script.")
+        exit(1)
