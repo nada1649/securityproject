@@ -21,8 +21,17 @@ jobs:
           # Add any required libraries here
           # pip install ...
 
+      - name: Debug env presence
+        run: |
+          if [ -z "$CHACHA_KEY" ]; then echo "CHACHA_KEY is missing"; else echo "CHACHA_KEY is present"; fi
+          if [ -z "$CHACHA_NONCE" ]; then echo "CHACHA_NONCE is missing"; else echo "CHACHA_NONCE is present"; fi
+        env:
+          CHACHA_KEY: ${{ secrets.CHACHA_KEY }}
+          CHACHA_NONCE: ${{ secrets.CHACHA_NONCE }}
+
       - name: Run encryption script
         env:
           CHACHA_KEY: ${{ secrets.CHACHA_KEY }}
           CHACHA_NONCE: ${{ secrets.CHACHA_NONCE }}
-        run: python chacha_encrypt.py "./test folder" # Replace with the actual path
+        run: |
+          python chacha_encrypt.py
