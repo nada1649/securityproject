@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 import stat
 
-# --- ChaCha20 Core Functions ---
 def rotl32(v, n):
     return ((v << n) & 0xFFFFFFFF) | (v >> (32 - n))
 
@@ -49,7 +48,6 @@ def chacha_block(key, counter, nonce):
     return struct.pack('<16L', *working_state)
 
 def chacha_decrypt_data(key, nonce, ciphertext):
-    """Decryption is identical to encryption in ChaCha20"""
     plaintext = bytearray()
     counter = 0
 
@@ -62,21 +60,18 @@ def chacha_decrypt_data(key, nonce, ciphertext):
 
     return bytes(plaintext)
 
-# --- File System Utilities ---
+#File System Functions
 def remove_readonly(func, path, _):
-    """Clear the readonly bit and reattempt the removal"""
     os.chmod(path, stat.S_IWRITE)
     func(path)
 
 def decrypt_file(file_path, key, nonce):
-    """Decrypt a single file in place"""
     try:
         with open(file_path, 'rb') as f:
             ciphertext = f.read()
 
         decrypted_data = chacha_decrypt_data(key, nonce, ciphertext)
 
-        # Write decrypted data back to the same file
         with open(file_path, 'wb') as f:
             f.write(decrypted_data)
 
@@ -85,12 +80,10 @@ def decrypt_file(file_path, key, nonce):
         print(f"Error decrypting {file_path}: {str(e)}")
         return False
 
-# --- Main Decryption Function ---
 def decrypt_folder_in_place(folder_path, key, nonce):
-    """Decrypt all encrypted files in folder"""
     folder_path = Path(folder_path).resolve()
     if not folder_path.exists():
-        print(f"Error: Folder '{folder_path}' does not exist")
+        print(f"Folder '{folder_path}' does not exist")
         return False
 
     decrypted_files = 0
@@ -103,36 +96,26 @@ def decrypt_folder_in_place(folder_path, key, nonce):
             for file in files:
                 file_path = Path(root) / file
 
-                # Only process files with .encrypted extension
                 if file_path.suffix != '.encrypted':
                     continue
 
-                print(f"Decrypting: {file_path}")
                 if decrypt_file(file_path, key, nonce):
-                    # Remove .encrypted extension
                     original_path = file_path.with_name(file_path.stem)
                     file_path.rename(original_path)
                     decrypted_files += 1
                 else:
                     failed_files += 1
 
-        print(f"\n{'='*40}")
-        print("Decryption Complete!")
         print(f"Files decrypted: {decrypted_files}")
         print(f"Files failed: {failed_files}")
-        print("="*40)
 
         return decrypted_files > 0
 
     except Exception as e:
-        print(f"\nError during folder decryption: {str(e)}")
+        print(f"\nDecryption failed: {str(e)}")
         return False
 
 if __name__ == "__main__":
-    print("=== In-Place File Decryption ===")
-    print("Decrypts .encrypted files in the folder\n")
-
-    # Get security parameters from environment variables
     key_hex = os.environ.get('CHACHA_KEY')
     nonce_hex = os.environ.get('CHACHA_NONCE')
 
@@ -140,22 +123,16 @@ if __name__ == "__main__":
         try:
             key = bytes.fromhex(key_hex)
             nonce = bytes.fromhex(nonce_hex)
-            print("Using key and nonce from environment variables.")
 
-            # Automatically target the "test folder" in the same directory as the script
             script_directory = os.path.dirname(os.path.abspath(__file__))
             target_folder = os.path.join(script_directory, "test folder")
-            print(f"Attempting to decrypt files in folder: {target_folder}")
 
             if decrypt_folder_in_place(target_folder, key, nonce):
-                print("\nDecryption successful! Files restored to original names.")
+                print("\nDecryption successful")
             else:
-                print("\nDecryption failed. Some files may remain encrypted or no encrypted files were found.")
+                print("\nDecryption failed")
 
         except ValueError:
-            print("Invalid key or nonce format in environment variables. Must be valid hexadecimal.")
-            exit(1)
+            print("Invalid key or nonce format in environment variables.")
     else:
-        print("Error: Environment variables CHACHA_KEY and CHACHA_NONCE not found. Exiting.")
-        print("Ensure these are set when running the script.")
-        exit(1)
+        print("Environment variables CHACHA_KEY and CHACHA_NONCE not found.")

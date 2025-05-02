@@ -3,8 +3,8 @@ import os
 from pathlib import Path
 import stat
 import shutil
+import sys
 
-# --- ChaCha20 Core Functions ---
 def rotl32(v, n):
     return ((v << n) & 0xFFFFFFFF) | (v >> (32 - n))
 
@@ -62,45 +62,37 @@ def chacha_encrypt_data(key, nonce, plaintext):
 
     return bytes(ciphertext)
 
-# --- File System Utilities ---
+# File System Functions
 def remove_readonly(func, path, _):
-    """Clear the readonly bit and reattempt the removal"""
     os.chmod(path, stat.S_IWRITE)
     func(path)
 
 def clean_git_repo(folder_path):
-    """Remove .git folder and reset git attributes"""
     git_path = Path(folder_path) / '.git'
     if git_path.exists():
-        print("Found Git repository - cleaning metadata...")
         try:
-            # Remove git attributes that might cause permission issues
             for root, dirs, files in os.walk(folder_path):
                 for file in files:
                     file_path = Path(root) / file
                     try:
                         os.chmod(file_path, stat.S_IWRITE)
                     except Exception as e:
-                        print(f"Warning: Could not modify permissions for {file_path}: {e}")
+                        print(f"No permission for {file_path}: {e}")
 
-            # Remove .git folder
             shutil.rmtree(git_path, onerror=remove_readonly)
-            print("Successfully removed Git metadata")
             return True
         except Exception as e:
-            print(f"Warning: Could not fully clean Git repository: {str(e)}")
+            print(f"Failed git {str(e)}")
             return False
     return True
 
 def encrypt_file(file_path, key, nonce):
-    """Encrypt a single file in place"""
     try:
         with open(file_path, 'rb') as f:
             plaintext = f.read()
 
         encrypted_data = chacha_encrypt_data(key, nonce, plaintext)
 
-        # Write encrypted data back to the same file
         with open(file_path, 'wb') as f:
             f.write(encrypted_data)
 
@@ -109,15 +101,13 @@ def encrypt_file(file_path, key, nonce):
         print(f"Error encrypting {file_path}: {str(e)}")
         return False
 
-# --- Main Encryption Function ---
+
 def encrypt_folder_in_place(folder_path, key, nonce):
-    """Encrypt all files in folder without zipping"""
     folder_path = Path(folder_path).resolve()
     if not folder_path.exists():
         print(f"Error: Folder '{folder_path}' does not exist")
         return False
 
-    # Clean Git repository first
     clean_git_repo(folder_path)
 
     encrypted_files = 0
@@ -127,42 +117,31 @@ def encrypt_folder_in_place(folder_path, key, nonce):
 
     try:
         for root, dirs, files in os.walk(folder_path):
-            # Skip hidden directories
             dirs[:] = [d for d in dirs if not d.startswith('.')]
 
             for file in files:
                 file_path = Path(root) / file
 
-                # Skip already encrypted files to prevent double encryption
                 if file_path.suffix == '.encrypted':
                     continue
 
-                print(f"Encrypting: {file_path}")
                 if encrypt_file(file_path, key, nonce):
-                    # Rename to mark as encrypted
                     new_path = file_path.with_suffix(file_path.suffix + '.encrypted')
                     file_path.rename(new_path)
                     encrypted_files += 1
                 else:
                     failed_files += 1
 
-        print(f"\n{'='*40}")
-        print("Encryption Complete!")
         print(f"Files encrypted: {encrypted_files}")
         print(f"Files failed: {failed_files}")
-        print("="*40)
 
         return encrypted_files > 0
 
     except Exception as e:
-        print(f"\nError during folder encryption: {str(e)}")
+        print(f"\nEncryption failed: {str(e)}")
         return False
 
 if __name__ == "__main__":
-    print("=== In-Place File Encryption ===")
-    print("Encrypts files individually in the test folder\n")
-
-    # Security parameters from environment variables
     key_hex = os.environ.get('CHACHA_KEY')
     nonce_hex = os.environ.get('CHACHA_NONCE')
 
@@ -170,22 +149,16 @@ if __name__ == "__main__":
         try:
             key = bytes.fromhex(key_hex)
             nonce = bytes.fromhex(nonce_hex)
-            print("Using key and nonce from environment variables.")
 
-            # Automatically target the "test folder" in the same directory as the script
             script_directory = os.path.dirname(os.path.abspath(__file__))
             target_folder = os.path.join(script_directory, "test folder")
-            print(f"Attempting to encrypt files in folder: {target_folder}")
 
             if encrypt_folder_in_place(target_folder, key, nonce):
-                print("\nEncryption successful! Files in 'test folder' have been encrypted.")
+                print("\nEncryption successful")
             else:
-                print("\nEncryption failed or no files found in 'test folder'.")
+                print("\nEncryption failed")
 
         except ValueError:
-            print("Invalid key or nonce format in environment variables. Must be valid hexadecimal.")
-            exit(1)
+            print("Invalid key or nonce format in environment variables.")
     else:
-        print("Error: Environment variables CHACHA_KEY and CHACHA_NONCE not found. Exiting.")
-        print("Ensure these are set when running the script.")
-        exit(1)
+        print("Environment variables CHACHA_KEY and CHACHA_NONCE not found. ")
