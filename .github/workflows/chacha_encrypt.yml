@@ -34,7 +34,7 @@ jobs:
           ls -al "./test folder"
 
       - name: Upload encrypted files as artifact
-        uses: actions/upload-artifact@latest
+        uses: actions/upload-artifact
         with:
           name: encrypted-files
           path: ./test\ folder/*.encrypted
