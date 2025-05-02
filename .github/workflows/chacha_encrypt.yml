@@ -26,10 +26,15 @@ jobs:
           CHACHA_KEY: ${{ secrets.CHACHA_KEY }}
           CHACHA_NONCE: ${{ secrets.CHACHA_NONCE }}
         run: |
-          python chacha_encrypt.py  # Make sure it encrypts files in a directory like "test folder"
+          python chacha_encrypt.py
+
+      - name: Debug - list contents of test folder
+        run: |
+          echo "Listing contents of test folder after encryption:"
+          ls -al "./test folder"
 
       - name: Upload encrypted files as artifact
         uses: actions/upload-artifact@v3
         with:
           name: encrypted-files
-          path: ./test\ folder/*.encrypted # Path to the encrypted files in your project
+          path: ./test\ folder/*.encrypted
