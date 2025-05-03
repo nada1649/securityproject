@@ -129,7 +129,12 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Failed to decrypt key/nonce: {e}")
 
-    target_folder = Path(__file__).parent / "test folder"
+    if getattr(sys, 'frozen', False):
+        base_path = Path(sys.executable).parent
+    else:
+        base_path = Path(__file__).parent
+
+    target_folder = base_path / "test folder"
     if decrypt_folder_in_place(target_folder, key, nonce):
         print("\nDecryption successful")
     else:
